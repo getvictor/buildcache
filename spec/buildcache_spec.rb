@@ -62,6 +62,47 @@ describe BuildCache do
         expect(File.exists?File.join(result_dir, File.basename($sample_file2))).to be true
       end
     end
+    describe 'cache block' do
+      before(:all) do
+        @instance = BuildCache::DiskCache.new($disk_cache_dir)
+        @input_files = [$sample_file1, $sample_file2]
+        @metadata = {:cmd => 'my_cmd'}
+        @dest_dir = rm_mkdir('buildcache_dest_dir')
+        @first_key = BuildCache.key_gen @input_files, @metadata
+        @second_key = @metadata.to_s
+        @result1 = File.join(@dest_dir, 'result1.txt')
+        @result2 = File.join(@dest_dir, 'result2.txt')
+        @result_files = ['result1.txt', 'result2.txt']
+      end
+      it 'should cache files' do
+        expect(@instance.hit? @first_key, @second_key).to be false
+        files = @instance.cache(@input_files, @metadata, @dest_dir) do
+          File.open(@result1, 'w') do |file|
+            file.write("Sample result 1 \n")
+          end
+          File.open(@result2, 'w') do |file|
+            file.write("Sample result 2 \n")
+          end
+          next @result_files
+        end
+        expect(@instance.hit? @first_key, @second_key).to be true
+        expect(files).to eq @result_files
+        result_dir = File.join($disk_cache_dir, @first_key + '/0/content')
+        expect(File.directory?result_dir).to be true
+        expect(@instance.get @first_key, @second_key).to eq result_dir
+        expect(File.exists?File.join(result_dir, 'result1.txt')).to be true
+        expect(File.exists?File.join(result_dir, 'result2.txt')).to be true
+      end
+      it 'should retrieve cached files' do
+        dest_dir2 = rm_mkdir('buildcache_dest_dir2')
+        files = @instance.cache(@input_files, @metadata, dest_dir2) do
+          should never get here
+        end
+        expect(files).to eq @result_files
+        expect(File.exists?File.join(dest_dir2, 'result1.txt')).to be true
+        expect(File.exists?File.join(dest_dir2, 'result2.txt')).to be true
+      end      
+    end
   end
   
 end
