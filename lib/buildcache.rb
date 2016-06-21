@@ -56,11 +56,13 @@ module BuildCache
         FileUtils.mkpath(content_dir)
 
         # Copy second key
+        FileUtils.touch cache_dir + '/last_used'
         second_key_file = File.open(cache_dir + '/second_key', 'w+')
         second_key_file.flock(File::LOCK_EX)
         second_key_file.write(second_key)
 
       else
+        FileUtils.touch content_dir + '/../last_used'
         second_key_file = File.open(content_dir + '/../second_key', 'r')
         second_key_file.flock(File::LOCK_EX)
         # Clear any existing files out of cache directory
@@ -94,6 +96,7 @@ module BuildCache
         out = second_key_file.read
         second_key_file.close
         if (second_key.to_s == out)
+          FileUtils.touch cache_dir + '/last_used'
           cache_dir = File.join(cache_dir, 'content')
           return cache_dir if File.directory?(cache_dir)
         end
