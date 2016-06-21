@@ -27,20 +27,38 @@ describe BuildCache do
     describe 'cache one file' do
       before(:all) do
         @instance = BuildCache::DiskCache.new($disk_cache_dir)
+        @first_key = BuildCache.key_gen([$sample_file1])
       end
       it 'should not be cached' do
-        @first_key = BuildCache.key_gen([$sample_file1])
         expect(@instance.hit? @first_key).to be false
         expect(@instance.get @first_key).to be_nil
       end
       it 'should cache file' do
-        @first_key = BuildCache.key_gen([$sample_file1])
         @instance.set(@first_key, nil, [$sample_file1])
         expect(@instance.hit? @first_key).to be true
         result_dir = File.join($disk_cache_dir, @first_key + '/0/content')
         expect(File.directory?result_dir).to be true
         expect(@instance.get @first_key).to eq result_dir
         expect(File.exists?File.join(result_dir, File.basename($sample_file1))).to be true
+      end
+      it 'should cache file with same first_key' do
+        second_key = 'something_unique'
+        @instance.set(@first_key, second_key, [$sample_file2])
+        expect(@instance.hit? @first_key, second_key).to be true
+        result_dir = File.join($disk_cache_dir, @first_key + '/1/content')
+        expect(File.directory?result_dir).to be true
+        expect(@instance.get @first_key, second_key).to eq result_dir
+        expect(File.exists?File.join(result_dir, File.basename($sample_file2))).to be true
+      end
+      it 'should overwrite cached file' do
+        second_key = 'something_unique'
+        @instance.set(@first_key, second_key, [$sample_file1])
+        expect(@instance.hit? @first_key, second_key).to be true
+        result_dir = File.join($disk_cache_dir, @first_key + '/1/content')
+        expect(File.directory?result_dir).to be true
+        expect(@instance.get @first_key, second_key).to eq result_dir
+        expect(File.exists?File.join(result_dir, File.basename($sample_file1))).to be true
+        expect(File.exists?File.join(result_dir, File.basename($sample_file2))).to be false
       end
     end
     describe 'cache multile files' do
@@ -101,7 +119,7 @@ describe BuildCache do
         expect(files).to eq @result_files
         expect(File.exists?File.join(dest_dir2, 'result1.txt')).to be true
         expect(File.exists?File.join(dest_dir2, 'result2.txt')).to be true
-      end      
+      end
     end
   end
   

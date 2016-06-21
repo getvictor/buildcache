@@ -19,11 +19,17 @@ module BuildCache
 
   class DiskCache
 
+    # The directory containing cached files
     attr_reader :dir
+
+    # The Linux permissions that cached files should have
     attr_reader :permissions
 
     def initialize dir='/tmp/cache', permissions=0666
-      # TODO: Make sure 'dir' is not a file
+      # Make sure 'dir' is not a file
+      if (File.exist?(dir) && !File.directory?(dir))
+        raise "DiskCache dir #{dir} should be a directory."
+      end
       @dir = dir
       @permissions = permissions
       mkdir
@@ -31,32 +37,67 @@ module BuildCache
 
     def set first_key, second_key='', files=[]
       # TODO: validate inputs
-      # Make sure cache dir doesn't exist already
-      cache_dir = File.join(dir, first_key + '/0')
-      raise "BuildCache directory #{cache_dir} already exists" if File.directory?(cache_dir)
-      content_dir = File.join(cache_dir, '/content')
-      FileUtils.mkpath(content_dir)
 
-      # Copy second key
-      second_key_file = File.open(cache_dir + '/second_key', 'w+')
-      second_key_file.flock(File::LOCK_EX)
-      second_key_file.write(second_key)
-      second_key_file.close
+      # If cache exists already, overwrite it.
+      content_dir = get first_key, second_key
+      second_key_file = nil
+
+      if (content_dir.nil?)
+
+        # Make sure cache dir doesn't exist already
+        cache_dir = File.join(dir, first_key)
+        if (File.exist?cache_dir)
+          raise "BuildCache directory #{cache_dir} should be a directory" unless File.directory?(cache_dir)
+        else
+          FileUtils.mkpath(cache_dir)
+        end
+        cache_dir = cache_dir + '/' +  Dir[cache_dir + '/*'].length.to_s
+        content_dir = File.join(cache_dir, '/content')
+        FileUtils.mkpath(content_dir)
+
+        # Copy second key
+        second_key_file = File.open(cache_dir + '/second_key', 'w+')
+        second_key_file.flock(File::LOCK_EX)
+        second_key_file.write(second_key)
+
+      else
+        second_key_file = File.open(content_dir + '/../second_key', 'r')
+        second_key_file.flock(File::LOCK_EX)
+        # Clear any existing files out of cache directory
+        FileUtils.rm_rf(content_dir + '/.')
+      end
 
       # Copy files into content_dir
       files.each do |filename|
         FileUtils.cp(filename, content_dir)
       end
       FileUtils.chmod(permissions, Dir[content_dir + '/*'])
+
+      # Release the lock
+      second_key_file.close
       
     end
 
     # Get the cache directory containing the contents corresponding to the keys
     def get first_key, second_key=''
       # TODO: validate inputs
-      # TODO: Consider second_key
-      cache_dir = File.join(dir, first_key + '/0/content')
-      return cache_dir if File.directory?(cache_dir)
+
+      cache_dirs = Dir[File.join(@dir, first_key + '/*')]
+      cache_dirs.each do |cache_dir|
+        second_key_filename = cache_dir + '/second_key'
+        # If second key file is bad, we skip this directory
+        if (!File.exist?(second_key_filename) || File.directory?(second_key_filename))
+          next
+        end
+        second_key_file = File.open(second_key_filename, "r" )
+        second_key_file.flock(File::LOCK_SH)
+        out = second_key_file.read
+        second_key_file.close
+        if (second_key.to_s == out)
+          cache_dir = File.join(cache_dir, 'content')
+          return cache_dir if File.directory?(cache_dir)
+        end
+      end
       return nil
     end
 
@@ -79,7 +120,10 @@ module BuildCache
       # If cache miss, run the block and put the results in the cache
       files = yield
       output_files = files.map { |filename| File.join(dest_dir, filename) }
-      set(first_key, second_key, output_files)
+      # Check the cache again in case someone else populated it already
+      unless (hit?first_key, second_key)
+        set(first_key, second_key, output_files)
+      end
       return files
     end
     
