@@ -61,7 +61,7 @@ describe BuildCache do
         expect(File.exists?File.join(result_dir, File.basename($sample_file2))).to be false
       end
     end
-    describe 'cache multile files' do
+    describe 'cache multiple files' do
       before(:all) do
         @instance = BuildCache::DiskCache.new($disk_cache_dir)
         @first_key = BuildCache.key_gen([$sample_file1, $sample_file2])

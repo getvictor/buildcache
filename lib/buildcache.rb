@@ -116,6 +116,7 @@ module BuildCache
       # If cache hit, copy the files to the dest_dir
       if (hit?first_key, second_key)
         cache_dir = get first_key, second_key
+        mkdir dest_dir
         FileUtils.cp_r(cache_dir + '/.', dest_dir)
         return Dir[cache_dir + '/*'].map { |pathname| File.basename pathname }
       end
@@ -132,7 +133,7 @@ module BuildCache
     
     private
       
-    def mkdir
+    def mkdir dir=@dir
       FileUtils.mkpath(dir) unless File.directory?(dir)
     end
 
