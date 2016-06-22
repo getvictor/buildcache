@@ -25,6 +25,9 @@ module BuildCache
     # The Linux permissions that cached files should have
     attr_reader :permissions
 
+    # Flag to enable logging
+    attr_accessor :enable_logging
+
     def initialize dir='/tmp/cache', permissions=0666
       # Make sure 'dir' is not a file
       if (File.exist?(dir) && !File.directory?(dir))
@@ -32,6 +35,7 @@ module BuildCache
       end
       @dir = dir
       @permissions = permissions
+      @enable_logging = false
       mkdir
     end
 
@@ -62,6 +66,8 @@ module BuildCache
         second_key_file.write(second_key)
 
       else
+        log "overwriting cache #{content_dir}"
+
         FileUtils.touch content_dir + '/../last_used'
         second_key_file = File.open(content_dir + '/../second_key', 'r')
         second_key_file.flock(File::LOCK_EX)
@@ -77,6 +83,8 @@ module BuildCache
 
       # Release the lock
       second_key_file.close
+
+      return content_dir
       
     end
 
@@ -116,6 +124,7 @@ module BuildCache
       # If cache hit, copy the files to the dest_dir
       if (hit?first_key, second_key)
         cache_dir = get first_key, second_key
+        log "cache hit #{cache_dir}"
         mkdir dest_dir
         FileUtils.cp_r(cache_dir + '/.', dest_dir)
         return Dir[cache_dir + '/*'].map { |pathname| File.basename pathname }
@@ -126,7 +135,8 @@ module BuildCache
       output_files = files.map { |filename| File.join(dest_dir, filename) }
       # Check the cache again in case someone else populated it already
       unless (hit?first_key, second_key)
-        set(first_key, second_key, output_files)
+        cache_dir = set(first_key, second_key, output_files)
+        log "cache miss, caching results to #{cache_dir}"
       end
       return files
     end
@@ -135,6 +145,12 @@ module BuildCache
       
     def mkdir dir=@dir
       FileUtils.mkpath(dir) unless File.directory?(dir)
+    end
+
+    def log message
+      if (@enable_logging)
+        puts "[BuildCache::DiskCache] #{message.to_s}"
+      end
     end
 
   end

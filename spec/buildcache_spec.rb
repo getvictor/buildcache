@@ -52,6 +52,7 @@ describe BuildCache do
       end
       it 'should overwrite cached file' do
         second_key = 'something_unique'
+        @instance.enable_logging = true
         @instance.set(@first_key, second_key, [$sample_file1])
         expect(@instance.hit? @first_key, second_key).to be true
         result_dir = File.join($disk_cache_dir, @first_key + '/1/content')
@@ -83,6 +84,7 @@ describe BuildCache do
     describe 'cache block' do
       before(:all) do
         @instance = BuildCache::DiskCache.new($disk_cache_dir)
+        @instance.enable_logging = true
         @input_files = [$sample_file1, $sample_file2]
         @metadata = {:cmd => 'my_cmd'}
         @dest_dir = rm_mkdir('buildcache_dest_dir')
