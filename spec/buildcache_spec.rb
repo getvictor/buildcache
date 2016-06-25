@@ -61,6 +61,16 @@ describe BuildCache do
         expect(File.exists?File.join(result_dir, File.basename($sample_file1))).to be true
         expect(File.exists?File.join(result_dir, File.basename($sample_file2))).to be false
       end
+      it 'should cache file when first_key subdirectories don\'t exist' do
+        FileUtils.rm_rf(Dir[File.join($disk_cache_dir, @first_key, '*')])
+        expect(@instance.hit? @first_key).to be false
+        @instance.set(@first_key, nil, [$sample_file1])
+        expect(@instance.hit? @first_key).to be true
+        result_dir = File.join($disk_cache_dir, @first_key + '/0/content')
+        expect(File.directory?result_dir).to be true
+        expect(@instance.get @first_key).to eq result_dir
+        expect(File.exists?File.join(result_dir, File.basename($sample_file1))).to be true
+      end
     end
     describe 'cache multiple files' do
       before(:all) do
@@ -107,6 +117,7 @@ describe BuildCache do
         end
         expect(@instance.hit? @first_key, @second_key).to be true
         expect(files).to eq @result_files
+        expect(File.exist?File.join($disk_cache_dir, @first_key, 'last_used'))
         result_dir = File.join($disk_cache_dir, @first_key + '/0/content')
         expect(File.directory?result_dir).to be true
         expect(@instance.get @first_key, @second_key).to eq result_dir
@@ -121,6 +132,35 @@ describe BuildCache do
         expect(files).to eq @result_files
         expect(File.exists?File.join(dest_dir2, 'result1.txt')).to be true
         expect(File.exists?File.join(dest_dir2, 'result2.txt')).to be true
+      end
+    end
+    describe 'cache evict' do
+      before(:all) do
+        @instance = BuildCache::DiskCache.new($disk_cache_dir)
+        @instance.enable_logging = true
+      end
+      before(:each) do
+        FileUtils.rm_rf(Dir[$disk_cache_dir + '/*'])
+        expect(Dir[$disk_cache_dir + '/*'].empty?).to be true
+      end
+      it 'should evict entries' do
+        @instance.check_size_percent = 0
+        i = 0
+        10.times do
+          @instance.set("#{i}", nil, [$sample_file1])
+          i += 1
+        end
+        expect(Dir[$disk_cache_dir + '/*'].size).to be 10
+        FileUtils.touch($disk_cache_dir + '/0/0/last_used', :mtime => Time.now + (2 * 60 * 60))
+        FileUtils.touch($disk_cache_dir + '/1/0/last_used', :mtime => Time.now - (2 * 60 * 60))
+        FileUtils.touch($disk_cache_dir + '/0/0/last_used')
+        @instance.check_size_percent = 99.9
+        @instance.max_cache_size = 9
+        @instance.evict_percent = 50.0
+        @instance.set('11', nil, [$sample_file1])
+        expect(Dir[$disk_cache_dir + '/*'].size).to be 6
+        expect(File.exist?File.join($disk_cache_dir, '0')).to be true
+        expect(File.exist?File.join($disk_cache_dir, '1')).to be false
       end
     end
   end

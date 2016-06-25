@@ -28,6 +28,16 @@ module BuildCache
     # Flag to enable logging
     attr_accessor :enable_logging
 
+    # Percent of time to check the cache size
+    attr_accessor :check_size_percent
+
+    # The maximum number of entries in the cache.
+    # Note that since we don't check the cache size every time, the actual size might exceed this number
+    attr_accessor :max_cache_size
+
+    # The percent of entries to evict (delete) if size is exceeded
+    attr_accessor :evict_percent
+
     def initialize dir='/tmp/cache', permissions=0666
       # Make sure 'dir' is not a file
       if (File.exist?(dir) && !File.directory?(dir))
@@ -36,6 +46,9 @@ module BuildCache
       @dir = dir
       @permissions = permissions
       @enable_logging = false
+      @check_size_percent = 20
+      @max_cache_size = 5000
+      @evict_percent = 20.0
       mkdir
     end
 
@@ -48,19 +61,31 @@ module BuildCache
 
       if (content_dir.nil?)
 
+        # Check the size of cache, and evict entries if too large
+        check_cache_size if (rand(100) < check_size_percent)
+
         # Make sure cache dir doesn't exist already
-        cache_dir = File.join(dir, first_key)
-        if (File.exist?cache_dir)
-          raise "BuildCache directory #{cache_dir} should be a directory" unless File.directory?(cache_dir)
+        first_cache_dir = File.join(dir, first_key)
+        if (File.exist?first_cache_dir)
+          raise "BuildCache directory #{first_cache_dir} should be a directory" unless File.directory?(first_cache_dir)
         else
-          FileUtils.mkpath(cache_dir)
+          FileUtils.mkpath(first_cache_dir)
         end
-        cache_dir = cache_dir + '/' +  Dir[cache_dir + '/*'].length.to_s
+        num_second_dirs = Dir[first_cache_dir + '/*'].length
+        cache_dir = File.join(first_cache_dir, num_second_dirs.to_s)
+        # If cache directory already exists, then a directory must have been evicted here, so we pick another name
+        while File.directory?cache_dir
+          cache_dir = File.join(first_cache_dir, rand(num_second_dirs).to_s)
+        end
         content_dir = File.join(cache_dir, '/content')
         FileUtils.mkpath(content_dir)
 
+        # Create 'last_used' file
+        last_used_filename = File.join(cache_dir, 'last_used')
+        FileUtils.touch last_used_filename
+        FileUtils.chmod(permissions, last_used_filename)
+
         # Copy second key
-        FileUtils.touch cache_dir + '/last_used'
         second_key_file = File.open(cache_dir + '/second_key', 'w+')
         second_key_file.flock(File::LOCK_EX)
         second_key_file.write(second_key)
@@ -102,12 +127,13 @@ module BuildCache
         second_key_file = File.open(second_key_filename, "r" )
         second_key_file.flock(File::LOCK_SH)
         out = second_key_file.read
-        second_key_file.close
         if (second_key.to_s == out)
           FileUtils.touch cache_dir + '/last_used'
           cache_dir = File.join(cache_dir, 'content')
+          second_key_file.close
           return cache_dir if File.directory?(cache_dir)
         end
+        second_key_file.close
       end
       return nil
     end
@@ -139,6 +165,36 @@ module BuildCache
         log "cache miss, caching results to #{cache_dir}"
       end
       return files
+    end
+
+    def check_cache_size
+      log "checking cache size"
+      entries = Dir[@dir + '/*/*']
+      if entries.length > max_cache_size
+        # If cache is locked for maintainance (lock exists and less than 8 hours old), then we skip the check
+        lock_filename = File.join(@dir, 'cache_maintenance')
+        return if (File.exist?(lock_filename) && (File.mtime(lock_filename) > Time.now - (8 * 60 * 60)))
+        FileUtils.touch(lock_filename)
+
+        log "evicting old cache entries"
+        # evict some entries
+        entries = entries.sort do |a,b|
+          # evict entries that don't have a last_used file
+          a_file = File.join(a, 'last_used')
+          next -1 if !File.exist?a_file
+          b_file = File.join(b, 'last_used')
+          next 1 if !File.exist?b_file
+          next File.mtime(a_file) <=> File.mtime(b_file)
+        end
+
+        entries_to_delete = (entries.length * evict_percent / 100).ceil
+        entries[0..(entries_to_delete-1)].each { |entry| FileUtils.rm_rf(entry) }
+        # Delete empty directories
+        Dir[@dir + '/*'].each { |d| Dir.rmdir d if (File.directory?(d) && (Dir.entries(d) - %w[ . .. ]).empty?) }
+
+        # Delete lock file
+        FileUtils.rm lock_filename, :force => true
+      end
     end
     
     private
