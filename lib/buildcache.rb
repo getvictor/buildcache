@@ -59,57 +59,67 @@ module BuildCache
       content_dir = get first_key, second_key
       second_key_file = nil
 
-      if (content_dir.nil?)
+      begin
+        if (content_dir.nil?)
 
-        # Check the size of cache, and evict entries if too large
-        check_cache_size if (rand(100) < check_size_percent)
+          # Check the size of cache, and evict entries if too large
+          check_cache_size if (rand(100) < check_size_percent)
 
-        # Make sure cache dir doesn't exist already
-        first_cache_dir = File.join(dir, first_key)
-        if (File.exist?first_cache_dir)
-          raise "BuildCache directory #{first_cache_dir} should be a directory" unless File.directory?(first_cache_dir)
+          # Make sure cache dir doesn't exist already
+          first_cache_dir = File.join(dir, first_key)
+          if (File.exist?first_cache_dir)
+            raise "BuildCache directory #{first_cache_dir} should be a directory" unless File.directory?(first_cache_dir)
+          else
+            FileUtils.mkpath(first_cache_dir)
+          end
+          num_second_dirs = Dir[first_cache_dir + '/*'].length
+          cache_dir = File.join(first_cache_dir, num_second_dirs.to_s)
+          # If cache directory already exists, then a directory must have been evicted here, so we pick another name
+          while File.directory?cache_dir
+            cache_dir = File.join(first_cache_dir, rand(num_second_dirs).to_s)
+          end
+          content_dir = File.join(cache_dir, '/content')
+          FileUtils.mkpath(content_dir)
+
+          # Create 'last_used' file
+          last_used_filename = File.join(cache_dir, 'last_used')
+          FileUtils.touch last_used_filename
+          FileUtils.chmod(permissions, last_used_filename)
+
+          # Copy second key
+          second_key_file = File.open(cache_dir + '/second_key', 'w+')
+          second_key_file.flock(File::LOCK_EX)
+          second_key_file.write(second_key)
+
         else
-          FileUtils.mkpath(first_cache_dir)
+          log "overwriting cache #{content_dir}"
+
+          FileUtils.touch content_dir + '/../last_used'
+          second_key_file = File.open(content_dir + '/../second_key', 'r')
+          second_key_file.flock(File::LOCK_EX)
+          # Clear any existing files out of cache directory
+          FileUtils.rm_rf(content_dir + '/.')
         end
-        num_second_dirs = Dir[first_cache_dir + '/*'].length
-        cache_dir = File.join(first_cache_dir, num_second_dirs.to_s)
-        # If cache directory already exists, then a directory must have been evicted here, so we pick another name
-        while File.directory?cache_dir
-          cache_dir = File.join(first_cache_dir, rand(num_second_dirs).to_s)
+
+        # Copy files into content_dir
+        files.each do |filename|
+          FileUtils.cp(filename, content_dir)
         end
-        content_dir = File.join(cache_dir, '/content')
-        FileUtils.mkpath(content_dir)
+        FileUtils.chmod(permissions, Dir[content_dir + '/*'])
 
-        # Create 'last_used' file
-        last_used_filename = File.join(cache_dir, 'last_used')
-        FileUtils.touch last_used_filename
-        FileUtils.chmod(permissions, last_used_filename)
-
-        # Copy second key
-        second_key_file = File.open(cache_dir + '/second_key', 'w+')
-        second_key_file.flock(File::LOCK_EX)
-        second_key_file.write(second_key)
-
-      else
-        log "overwriting cache #{content_dir}"
-
-        FileUtils.touch content_dir + '/../last_used'
-        second_key_file = File.open(content_dir + '/../second_key', 'r')
-        second_key_file.flock(File::LOCK_EX)
-        # Clear any existing files out of cache directory
-        FileUtils.rm_rf(content_dir + '/.')
+        # Release the lock
+        second_key_file.close
+        return content_dir
+      rescue => e
+        # Something went wrong, like a full disk or some other error.
+        # Delete any work so we don't leave cache in corrupted state
+        unless content_dir.nil?
+          # Delete parent of content directory
+          FileUtils.rm_rf(File.expand_path('..', content_dir))
+        end
+        log "ERROR: Could not set cache entry. #{e.to_s}"
+        return 'ERROR: !NOT CACHED!'
       end
-
-      # Copy files into content_dir
-      files.each do |filename|
-        FileUtils.cp(filename, content_dir)
-      end
-      FileUtils.chmod(permissions, Dir[content_dir + '/*'])
-
-      # Release the lock
-      second_key_file.close
-
-      return content_dir
       
     end
 
@@ -117,23 +127,27 @@ module BuildCache
     def get first_key, second_key=''
       # TODO: validate inputs
 
-      cache_dirs = Dir[File.join(@dir, first_key + '/*')]
-      cache_dirs.each do |cache_dir|
-        second_key_filename = cache_dir + '/second_key'
-        # If second key filename is bad, we skip this directory
-        if (!File.exist?(second_key_filename) || File.directory?(second_key_filename))
-          next
-        end
-        second_key_file = File.open(second_key_filename, "r" )
-        second_key_file.flock(File::LOCK_SH)
-        out = second_key_file.read
-        if (second_key.to_s == out)
-          FileUtils.touch cache_dir + '/last_used'
-          cache_dir = File.join(cache_dir, 'content')
+      begin
+        cache_dirs = Dir[File.join(@dir, first_key + '/*')]
+        cache_dirs.each do |cache_dir|
+          second_key_filename = cache_dir + '/second_key'
+          # If second key filename is bad, we skip this directory
+          if (!File.exist?(second_key_filename) || File.directory?(second_key_filename))
+            next
+          end
+          second_key_file = File.open(second_key_filename, "r" )
+          second_key_file.flock(File::LOCK_SH)
+          out = second_key_file.read
+          if (second_key.to_s == out)
+            FileUtils.touch cache_dir + '/last_used'
+            cache_dir = File.join(cache_dir, 'content')
+            second_key_file.close
+            return cache_dir if File.directory?(cache_dir)
+          end
           second_key_file.close
-          return cache_dir if File.directory?(cache_dir)
         end
-        second_key_file.close
+      rescue => e
+        log "ERROR: Could not get cache entry. #{e.to_s}"
       end
       return nil
     end
@@ -149,11 +163,16 @@ module BuildCache
 
       # If cache hit, copy the files to the dest_dir
       if (hit?first_key, second_key)
-        cache_dir = get first_key, second_key
-        log "cache hit #{cache_dir}"
-        mkdir dest_dir
-        FileUtils.cp_r(cache_dir + '/.', dest_dir)
-        return Dir[cache_dir + '/*'].map { |pathname| File.basename pathname }
+        begin
+          cache_dir = get first_key, second_key
+          log "cache hit #{cache_dir}"
+          mkdir dest_dir
+          FileUtils.cp_r(cache_dir + '/.', dest_dir)
+          return Dir[cache_dir + '/*'].map { |pathname| File.basename pathname }
+        rescue => e
+          # Since we don't return, error counts as a cache miss
+          log "ERROR: Could not retrieve cache entry contents. #{e.to_s}"
+        end
       end
 
       # If cache miss, run the block and put the results in the cache
