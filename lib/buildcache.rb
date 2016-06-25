@@ -120,7 +120,7 @@ module BuildCache
       cache_dirs = Dir[File.join(@dir, first_key + '/*')]
       cache_dirs.each do |cache_dir|
         second_key_filename = cache_dir + '/second_key'
-        # If second key file is bad, we skip this directory
+        # If second key filename is bad, we skip this directory
         if (!File.exist?(second_key_filename) || File.directory?(second_key_filename))
           next
         end

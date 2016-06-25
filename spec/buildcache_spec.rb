@@ -146,21 +146,29 @@ describe BuildCache do
       it 'should evict entries' do
         @instance.check_size_percent = 0
         i = 0
-        10.times do
+        9.times do
           @instance.set("#{i}", nil, [$sample_file1])
           i += 1
         end
-        expect(Dir[$disk_cache_dir + '/*'].size).to be 10
+        @instance.set('2', '1', [$sample_file1])
+        expect(Dir[$disk_cache_dir + '/*/*'].size).to be 10
         FileUtils.touch($disk_cache_dir + '/0/0/last_used', :mtime => Time.now + (2 * 60 * 60))
         FileUtils.touch($disk_cache_dir + '/1/0/last_used', :mtime => Time.now - (2 * 60 * 60))
+        FileUtils.touch($disk_cache_dir + '/2/0/last_used', :mtime => Time.now - (2 * 60 * 60))
+        FileUtils.touch($disk_cache_dir + '/2/1/last_used', :mtime => Time.now + (2 * 60 * 60))
         FileUtils.touch($disk_cache_dir + '/0/0/last_used')
         @instance.check_size_percent = 99.9
         @instance.max_cache_size = 9
         @instance.evict_percent = 50.0
         @instance.set('11', nil, [$sample_file1])
-        expect(Dir[$disk_cache_dir + '/*'].size).to be 6
-        expect(File.exist?File.join($disk_cache_dir, '0')).to be true
-        expect(File.exist?File.join($disk_cache_dir, '1')).to be false
+        expect(Dir[$disk_cache_dir + '/*/*'].size).to be 6
+        expect(File.exist?File.join($disk_cache_dir, '0/0')).to be true
+        expect(File.exist?File.join($disk_cache_dir, '1/0')).to be false
+        expect(File.exist?File.join($disk_cache_dir, '2/0')).to be false
+        expect(File.exist?File.join($disk_cache_dir, '2/1')).to be true
+        # Cache a new entry in the directory that had 1 eviction
+        @instance.set('2', 'new', [$sample_file1])
+        expect(File.exist?File.join($disk_cache_dir, '2/0')).to be true
       end
     end
   end
