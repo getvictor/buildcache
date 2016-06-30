@@ -1,4 +1,5 @@
 require 'spec_helper'
+require 'logger'
 
 describe BuildCache do
   it 'has a version number' do
@@ -15,6 +16,12 @@ describe BuildCache do
   end
 
   describe BuildCache::DiskCache do
+    before(:all) do
+      @logger = Logger.new(STDOUT)
+      @logger.formatter = proc do |severity, datetime, progname, msg|
+        "      #{msg}\n"
+      end
+    end
     describe 'init' do
       it 'should init' do
         expect { BuildCache::DiskCache.new }.to_not raise_error
@@ -52,7 +59,7 @@ describe BuildCache do
       end
       it 'should overwrite cached file' do
         second_key = 'something_unique'
-        @instance.enable_logging = true
+        @instance.logger = @logger
         @instance.set(@first_key, second_key, [$sample_file1])
         expect(@instance.hit? @first_key, second_key).to be true
         result_dir = File.join($disk_cache_dir, @first_key + '/1/content')
@@ -94,7 +101,7 @@ describe BuildCache do
     describe 'cache block' do
       before(:all) do
         @instance = BuildCache::DiskCache.new($disk_cache_dir)
-        @instance.enable_logging = true
+        @instance.logger = @logger
         @input_files = [$sample_file1, $sample_file2]
         @metadata = {:cmd => 'my_cmd'}
         @dest_dir = rm_mkdir('buildcache_dest_dir')
@@ -137,7 +144,7 @@ describe BuildCache do
     describe 'cache evict' do
       before(:all) do
         @instance = BuildCache::DiskCache.new($disk_cache_dir)
-        @instance.enable_logging = true
+        @instance.logger = @logger
       end
       before(:each) do
         FileUtils.rm_rf(Dir[$disk_cache_dir + '/*'])

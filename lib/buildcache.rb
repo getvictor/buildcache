@@ -25,8 +25,8 @@ module BuildCache
     # The Linux permissions that cached files should have
     attr_reader :permissions
 
-    # Flag to enable logging
-    attr_accessor :enable_logging
+    # logger to use, if logger is not set, then messages will not be logged
+    attr_accessor :logger
 
     # Percent of time to check the cache size
     attr_accessor :check_size_percent
@@ -223,8 +223,8 @@ module BuildCache
     end
 
     def log message
-      if (@enable_logging)
-        puts "[BuildCache::DiskCache] #{message.to_s}"
+      unless (@logger.nil?)
+        @logger.info { "[BuildCache::DiskCache] #{message.to_s}" }
       end
     end
 
