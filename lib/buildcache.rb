@@ -1,4 +1,4 @@
-require 'buildcache/version'
+require_relative 'buildcache/version'
 require 'digest'
 
 module BuildCache
