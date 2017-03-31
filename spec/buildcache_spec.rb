@@ -78,6 +78,18 @@ describe BuildCache do
         expect(@instance.get @first_key).to eq result_dir
         expect(File.exists?File.join(result_dir, File.basename($sample_file1))).to be true
       end
+      it 'should miss if valid not present' do
+        @instance.set(@first_key, nil, [$sample_file1])
+        expect(@instance.hit? @first_key).to be true
+        result_dir = File.join($disk_cache_dir, @first_key + '/0/content')
+        # Remove 'valid' and check again
+        FileUtils.rm(result_dir + '/../valid')
+        expect(@instance.hit? @first_key).to be false
+        expect(@instance.get @first_key).to be_nil
+        # Set cache again
+        @instance.set(@first_key, nil, [$sample_file1])
+        expect(@instance.hit? @first_key).to be true
+      end
     end
     describe 'cache multiple files' do
       before(:all) do

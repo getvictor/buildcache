@@ -38,7 +38,7 @@ module BuildCache
     # The percent of entries to evict (delete) if size is exceeded
     attr_accessor :evict_percent
 
-    def initialize dir='/tmp/cache', permissions=0666
+    def initialize dir='/tmp/cache', permissions=0664
       # Make sure 'dir' is not a file
       if (File.exist?(dir) && !File.directory?(dir))
         raise "DiskCache dir #{dir} should be a directory."
@@ -90,6 +90,7 @@ module BuildCache
           second_key_file = File.open(cache_dir + '/second_key', 'w+')
           second_key_file.flock(File::LOCK_EX)
           second_key_file.write(second_key)
+          FileUtils.chmod(permissions, second_key_file)
 
         else
           log "overwriting cache #{content_dir}"
@@ -107,6 +108,10 @@ module BuildCache
         end
         FileUtils.chmod(permissions, Dir[content_dir + '/*'])
 
+        valid_filename = content_dir + '/../valid'
+        FileUtils.touch valid_filename
+        FileUtils.chmod(permissions, valid_filename)
+        
         # Release the lock
         second_key_file.close
         return content_dir
@@ -138,7 +143,7 @@ module BuildCache
           second_key_file = File.open(second_key_filename, "r" )
           second_key_file.flock(File::LOCK_SH)
           out = second_key_file.read
-          if (second_key.to_s == out)
+          if (second_key.to_s == out && File.exist?(cache_dir + '/valid'))
             FileUtils.touch cache_dir + '/last_used'
             cache_dir = File.join(cache_dir, 'content')
             second_key_file.close
